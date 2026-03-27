@@ -20,8 +20,7 @@ from typing import List, Set
 try:
     from google.auth.transport.requests import Request
     from google_auth_oauthlib.flow import InstalledAppFlow
-    from googleapiclient.discovery import build
-    from googleapiclient.errors import HttpError
+    import googleapiclient.discovery
 except ImportError:
     print("Error: Google API libraries not installed")
     print("Run: pip3 install google-auth-oauthlib google-auth-httplib2 googleapiclient")
@@ -121,7 +120,7 @@ class GmailCleanup:
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
         
-        self.service = build('gmail', 'v1', credentials=creds)
+        self.service = googleapiclient.discovery.build('gmail', 'v1', credentials=creds)
         logging.info("Successfully authenticated")
     
     def get_all_labels(self):
@@ -225,8 +224,9 @@ class GmailCleanup:
             logging.error(f"Error getting email info: {error}")
             return None
     
-    def filter_emails(self, message_ids, custom_label_ids):
+    def filter_emails(self, message_ids, custom_labels):
         logging.info(f"Checking {len(message_ids)} emails for custom labels...")
+        custom_label_ids = set(custom_labels.keys())
         
         to_delete = []
         to_keep = []
@@ -245,8 +245,13 @@ class GmailCleanup:
             # Check for protected labels
             has_protected_label = False
             if PROTECT_LABELS:
+                email_custom_label_names = [
+                    custom_labels.get(lid, '')
+                    for lid in email_info['labels']
+                    if lid in custom_labels
+                ]
                 for protect_label in PROTECT_LABELS:
-                    if any(protect_label.lower() in label.lower() for label in [custom_label_ids.get(lid, '') for lid in email_info['labels']]):
+                    if any(protect_label.lower() in label.lower() for label in email_custom_label_names):
                         has_protected_label = True
                         break
             
@@ -284,7 +289,6 @@ class GmailCleanup:
     def run(self):
         logging.info("\nStep 1: Identifying custom labels...")
         custom_labels = self.get_all_labels()
-        custom_label_ids = set(custom_labels.keys())
         
         logging.info("\nStep 2: Searching for old emails...")
         message_ids = self.search_emails()
@@ -294,7 +298,7 @@ class GmailCleanup:
             return
         
         logging.info("\nStep 3: Filtering by custom labels...")
-        to_delete, to_keep = self.filter_emails(message_ids, custom_label_ids)
+        to_delete, to_keep = self.filter_emails(message_ids, custom_labels)
         
         logging.info("\nStep 4: Deleting...")
         if to_delete:
